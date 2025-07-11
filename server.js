@@ -1,9 +1,8 @@
-// server.js
 const express = require("express");
 const http = require("http");
+const { Server } = require("socket.io");
 const fs = require("fs");
 const path = require("path");
-const { Server } = require("socket.io");
 const XLSX = require("xlsx");
 const { sendEmails } = require("./sendEmails");
 
@@ -11,8 +10,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-const SERIAL_PORT_PATH = "COM4";
-const BAUD_RATE = 9600;
+const BAUD_RATE = 9600; // no longer used directly on render
 
 let attendanceList = [];
 let lastSeen = {};
@@ -22,19 +20,18 @@ const credentials = {
   password: "password123",
 };
 
-// Serve static files from /public
 app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
 
-// Serve HTML pages
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
+
 app.get("/dashboard", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
 
-// Load student data
+// Load students
 const registeredStudentsPath = path.join(__dirname, "students.json");
 let students = {};
 if (fs.existsSync(registeredStudentsPath)) {
@@ -52,7 +49,6 @@ app.post("/register-student", (req, res) => {
   res.json({ message: "Student registered successfully" });
 });
 
-// Email queue
 const emailQueuePath = path.join(__dirname, "emailQueue.json");
 function queueEmail(log) {
   let queue = [];
@@ -69,70 +65,52 @@ function queueEmail(log) {
     status: log.status,
     date: log.date,
     time: log.time,
-    email,
+    email
   });
   fs.writeFileSync(emailQueuePath, JSON.stringify(queue, null, 2));
 }
 
-// Utility
 function getStudentName(tag) {
   return students[tag]?.name || `Unknown (${tag})`;
 }
 
-// ✅ Only use SerialPort when not on Render (based on env or default)
-if (process.env.USE_SERIAL !== "false") {
-  const { SerialPort, ReadlineParser } = require("serialport");
+// ✅ New endpoint to receive RFID tags from local PC
+app.post("/api/arduino-tag", (req, res) => {
+  const { tag } = req.body;
+  if (!tag) return res.status(400).send("Missing tag");
+
+  const now = Date.now();
+  const time = new Date();
+  const readableTime = time.toLocaleTimeString();
+  const readableDate = time.toLocaleDateString();
+  const name = getStudentName(tag);
+
+  const previous = lastSeen[tag];
+  let status = "IN";
+  if (!previous || previous.status === "OUT") {
+    status = "IN";
+  } else if (previous.status === "IN" && now - previous.timestamp > 5000) {
+    status = "OUT";
+  } else {
+    return res.json({ message: "Too soon to mark OUT again." });
+  }
+
+  lastSeen[tag] = { timestamp: now, status };
+  const log = { id: tag, name, time: readableTime, date: readableDate, status };
+  attendanceList.push(log);
+  queueEmail(log);
+  io.emit("rfid_tag", log);
 
   try {
-    const port = new SerialPort({ path: SERIAL_PORT_PATH, baudRate: BAUD_RATE });
-    const parser = port.pipe(new ReadlineParser({ delimiter: "\n" }));
-
-    parser.on("data", (data) => {
-      const tag = data.toString().trim().toUpperCase();
-      if (!/^[0-9A-F]{8,}$/.test(tag)) {
-        console.warn("⚠️ Invalid tag format:", tag);
-        return;
-      }
-
-      console.log("✅ UID received:", tag);
-      const now = Date.now();
-      const time = new Date();
-      const readableTime = time.toLocaleTimeString();
-      const readableDate = time.toLocaleDateString();
-      const name = getStudentName(tag);
-
-      const previous = lastSeen[tag];
-      let status;
-      if (!previous || previous.status === "OUT") {
-        status = "IN";
-      } else if (previous.status === "IN" && now - previous.timestamp > 5000) {
-        status = "OUT";
-      } else {
-        return;
-      }
-
-      lastSeen[tag] = { timestamp: now, status };
-      const log = { id: tag, name, time: readableTime, date: readableDate, status };
-      attendanceList.push(log);
-      queueEmail(log);
-      io.emit("rfid_tag", log);
-
-      try {
-        sendEmails();
-      } catch (error) {
-        console.error("❌ sendEmails error:", error.message);
-      }
-    });
-
-    console.log(`✅ Connected to Arduino on ${SERIAL_PORT_PATH}`);
-  } catch (err) {
-    console.error(`❌ Failed to open serial port: ${err.message}`);
+    sendEmails();
+  } catch (error) {
+    console.error("❌ sendEmails error:", error.message);
   }
-} else {
-  console.log("⚠️ Skipping SerialPort on Render (USE_SERIAL=false)");
-}
 
-// Socket.IO logic
+  res.json({ message: "Tag received", log });
+});
+
+// Socket.IO handlers
 io.on("connection", (socket) => {
   socket.on("login", (data) => {
     if (data.username === credentials.username && data.password === credentials.password) {
@@ -172,24 +150,21 @@ io.on("connection", (socket) => {
   socket.emit("attendance_list", attendanceList);
 });
 
-// Send emails API
+// Send email alerts endpoint
 app.post("/send-emails", (req, res) => {
   try {
     sendEmails();
-    res.json({ message: "Email alerts sent successfully." });
+    res.json({ message: "Emails sent successfully." });
   } catch (error) {
-    console.error("Email error:", error.message);
     res.status(500).json({ message: "Failed to send emails." });
   }
 });
 
-// Error handler
 process.on("uncaughtException", (error) => {
   console.error("💥 Uncaught Exception:", error);
 });
 
-// Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`✅ Server running at http://localhost:${PORT}`);
 });
