@@ -1,68 +1,57 @@
-require("dotenv").config();
+require("dotenv").config(); // Load environment variables
 const fs = require("fs");
 const path = require("path");
 const nodemailer = require("nodemailer");
 
 const emailQueuePath = path.join(__dirname, "emailQueue.json");
 
+// Create transporter using Gmail and environment credentials
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD,
+    user: process.env.EMAIL_USER,    // Your Gmail (e.g., yourname@gmail.com)
+    pass: process.env.EMAIL_PASS,    // Your Gmail App Password
   },
 });
 
 function sendEmails() {
   if (!fs.existsSync(emailQueuePath)) {
-    console.log("ℹ️ No email queue found.");
-    return { status: "empty" };
+    console.log("ℹ️ No email queue file found.");
+    return;
   }
 
   let queue;
   try {
     queue = JSON.parse(fs.readFileSync(emailQueuePath, "utf8"));
-  } catch (error) {
-    console.error("❌ Failed to parse email queue:", error);
-    return { status: "error", message: "Failed to parse email queue" };
+  } catch (err) {
+    console.error("❌ Failed to parse email queue:", err.message);
+    return;
   }
 
   if (!Array.isArray(queue) || queue.length === 0) {
     console.log("ℹ️ Email queue is empty.");
-    return { status: "empty" };
+    return;
   }
 
-  let successCount = 0;
-  let failCount = 0;
-
-  queue.forEach((entry) => {
+  queue.forEach((log) => {
     const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: entry.email,
-      subject: `Attendance Alert: ${entry.name}`,
-      text: `${entry.name} marked as ${entry.status} at ${entry.time} on ${entry.date}.`,
+      from: `"RFID Attendance System" <${process.env.EMAIL_USER}>`,
+      to: log.email,
+      subject: `Attendance Alert: ${log.name}`,
+      text: `${log.name} was marked as ${log.status} at ${log.time} on ${log.date}.`,
     };
 
     transporter.sendMail(mailOptions, (error, info) => {
       if (error) {
-        console.error(`❌ Email error for ${entry.email}: ${error.message}`);
-        failCount++;
+        console.error(`❌ Email error for ${log.email}:`, error.message);
       } else {
-        console.log(`✅ Email sent to ${entry.email}`);
-        successCount++;
+        console.log(`✅ Email sent to ${log.email}:`, info.response);
       }
     });
   });
 
-  // Clear queue after sending
+  // Clear the queue after sending
   fs.writeFileSync(emailQueuePath, JSON.stringify([], null, 2));
-
-  return {
-    status: "done",
-    message: `Emails sent: ${successCount}, Failed: ${failCount}`,
-  };
 }
 
-module.exports = {
-  sendEmails,
-};
+module.exports = { sendEmails };
