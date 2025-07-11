@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>RFID Attendance Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <style>
+    body {
+      background-color: #ffffff;
+      font-family: Arial, sans-serif;
+    }
+    .navbar {
+      background-color: #800000;
+      color: #fff;
+    }
+    .navbar-brand,
+    .navbar-brand img {
+      height: 50px;
+    }
+    .navbar-brand img {
+      background-color: #fff;
+      padding: 5px;
+      border-radius: 5px;
+    }
+    .card-header {
+      background-color: #800000 !important;
+      color: #fff !important;
+    }
+    .btn-primary, .btn-success {
+      background-color: #800000 !important;
+      border-color: #800000 !important;
+    }
+    .btn-primary:hover, .btn-success:hover {
+      background-color: #660000 !important;
+      border-color: #660000 !important;
+    }
+    .btn-danger {
+      background-color: #660000;
+      border-color: #660000;
+    }
+    .btn-danger:hover {
+      background-color: #550000;
+      border-color: #550000;
+    }
+    .table thead {
+      background-color: #800000;
+      color: #fff;
+    }
+    .sidebar {
+      background-color: #f8f9fa;
+      height: 100vh;
+      padding-top: 20px;
+    }
+    .sidebar .nav-link.active {
+      background-color: #800000;
+      color: #fff !important;
+    }
+    .content {
+      padding: 20px;
+    }
+  </style>
+</head>
+<body>
+  <nav class="navbar navbar-expand-lg px-4">
+    <div class="container-fluid">
+      <a class="navbar-brand d-flex align-items-center" href="#">
+        <img src="school_logo.png" alt="School Logo" class="me-2" />
+        <span class="text-white fw-bold">RFID Attendance System</span>
+      </a>
+      <button class="btn btn-light ms-auto" onclick="logout()">Logout</button>
+    </div>
+  </nav>
+
+  <div class="container-fluid">
+    <div class="row">
+      <!-- Sidebar -->
+      <div class="col-md-2 sidebar">
+        <nav class="nav flex-column">
+          <a class="nav-link active" href="#" onclick="showSection('logs')">
+            <i class="fas fa-clipboard-list me-2"></i> Attendance Logs
+          </a>
+          <a class="nav-link" href="#" onclick="showSection('register')">
+            <i class="fas fa-user-plus me-2"></i> Registered Students
+          </a>
+          <a class="nav-link" href="#" onclick="showSection('settings')">
+            <i class="fas fa-cog me-2"></i> Settings
+          </a>
+          <a class="nav-link" href="#" onclick="showSection('help')">
+            <i class="fas fa-question-circle me-2"></i> Help
+          </a>
+          <a class="nav-link" href="#" onclick="showSection('contact')">
+            <i class="fas fa-envelope me-2"></i> Contact Us
+          </a>
+        </nav>
+      </div>
+
+      <!-- Main Content -->
+      <div class="col-md-10 content">
+        <!-- Attendance Logs -->
+        <div id="section-logs">
+          <div class="card shadow">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <h4 class="mb-0">Attendance Logs</h4>
+              <div class="d-flex gap-2">
+                <button class="btn btn-light btn-sm" onclick="exportExcel()">Export Excel</button>
+                <button class="btn btn-light btn-sm" onclick="sendAllEmails()">Send Email Alerts</button>
+              </div>
+            </div>
+            <div class="card-body">
+              <table class="table table-bordered table-striped">
+                <thead>
+                  <tr>
+                    <th>#</th><th>Name</th><th>RFID</th><th>Status</th><th>Time</th><th>Date</th><th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="logTable"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Register Students -->
+        <div id="section-register" style="display:none;">
+          <div class="card shadow mb-4">
+            <div class="card-header">
+              <h4>Register Student</h4>
+            </div>
+            <div class="card-body">
+              <div class="row g-2">
+                <div class="col-md-4"><input id="regName" class="form-control" placeholder="Student Name"></div>
+                <div class="col-md-4"><input id="regTag" class="form-control" placeholder="RFID Tag ID"></div>
+                <div class="col-md-4"><input id="regEmail" class="form-control" placeholder="Parent Email"></div>
+              </div>
+              <button class="btn btn-success mt-3" onclick="registerStudent()">Register</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Settings -->
+        <div id="section-settings" style="display:none;">
+          <div class="card shadow">
+            <div class="card-header">
+              <h4>Settings</h4>
+            </div>
+            <div class="card-body">
+              <p>Settings content will go here...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Help -->
+        <div id="section-help" style="display:none;">
+          <div class="card shadow">
+            <div class="card-header">
+              <h4>Help</h4>
+            </div>
+            <div class="card-body">
+              <p>Help information goes here...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Contact Us -->
+        <div id="section-contact" style="display:none;">
+          <div class="card shadow">
+            <div class="card-header">
+              <h4>Contact Us</h4>
+            </div>
+            <div class="card-body">
+              <p>You can contact the admin at <a href="mailto:support@enverga.edu.ph">support@enverga.edu.ph</a></p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+
+    function logout() {
+      window.location.href = "login.html";
+    }
+
+    function showSection(section) {
+      const sections = ["logs", "register", "settings", "help", "contact"];
+      sections.forEach(id => {
+        document.getElementById(`section-${id}`).style.display = id === section ? "block" : "none";
+      });
+      document.querySelectorAll(".nav-link").forEach(link => link.classList.remove("active"));
+      document.querySelector(`.nav-link[onclick*='${section}']`).classList.add("active");
+    }
+
+    function renderTable(data) {
+      const table = document.getElementById("logTable");
+      table.innerHTML = "";
+      data.forEach((log, i) => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${i + 1}</td>
+          <td><input type="text" class="form-control" value="${log.name}" onchange="updateLog(${i}, this.value)"/></td>
+          <td>${log.id}</td>
+          <td>${log.status}</td>
+          <td>${log.time}</td>
+          <td>${log.date}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteLog(${i})">Delete</button></td>`;
+        table.appendChild(row);
+      });
+    }
+
+    function updateLog(index, newName) {
+      socket.emit("update_log", index, newName);
+    }
+
+    function deleteLog(index) {
+      socket.emit("delete_log", index);
+    }
+
+    function exportExcel() {
+      socket.emit("export_excel");
+    }
+
+    function sendAllEmails() {
+      fetch("/send-emails", { method: "POST" })
+        .then((res) => res.json())
+        .then((data) => alert(data.message))
+        .catch((err) => alert("Error sending emails"));
+    }
+
+    function registerStudent() {
+      const name = document.getElementById("regName").value.trim();
+      const tag = document.getElementById("regTag").value.trim();
+      const email = document.getElementById("regEmail").value.trim();
+      fetch("/register-student", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ tag, name, email })
+      }).then(res => res.json())
+        .then(data => {
+          alert(data.message || "Student registered.");
+          document.getElementById("regName").value = "";
+          document.getElementById("regTag").value = "";
+          document.getElementById("regEmail").value = "";
+        }).catch(() => alert("Error registering student."));
+    }
+
+    socket.on("attendance_list", renderTable);
+    socket.on("export_ready", (filePath) => {
+      window.location.href = filePath;
+    });
+    socket.on("rfid_tag", () => {
+      socket.emit("attendance_list_request");
+    });
+
+    // Fetch data on load
+    socket.emit("attendance_list_request");
+  </script>
+</body>
+</html>
