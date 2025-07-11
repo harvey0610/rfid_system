@@ -1,59 +1,39 @@
 const express = require("express");
 const http = require("http");
-const { Server } = require("socket.io");
 const fs = require("fs");
 const path = require("path");
+const { Server } = require("socket.io");
 const XLSX = require("xlsx");
 const { sendEmails } = require("./sendEmails");
-const cors = require("cors");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-const PORT = process.env.PORT || 3000;
-
-// Middleware
-app.use(cors());
-app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
+app.use(express.json());
 
-// Credentials
 const credentials = {
   username: "admin",
   password: "password123",
 };
 
-// Load students
 const registeredStudentsPath = path.join(__dirname, "students.json");
-let students = {};
-if (fs.existsSync(registeredStudentsPath)) {
-  students = JSON.parse(fs.readFileSync(registeredStudentsPath, "utf8"));
-}
+let students = fs.existsSync(registeredStudentsPath)
+  ? JSON.parse(fs.readFileSync(registeredStudentsPath, "utf8"))
+  : {};
 
+const emailQueuePath = path.join(__dirname, "emailQueue.json");
 let attendanceList = [];
 let lastSeen = {};
 
-const emailQueuePath = path.join(__dirname, "emailQueue.json");
-
-// Queue email
 function queueEmail(log) {
-  let queue = [];
-  if (fs.existsSync(emailQueuePath)) {
-    try {
-      queue = JSON.parse(fs.readFileSync(emailQueuePath, "utf8"));
-    } catch (err) {
-      console.error("Error reading email queue:", err.message);
-    }
-  }
+  let queue = fs.existsSync(emailQueuePath)
+    ? JSON.parse(fs.readFileSync(emailQueuePath, "utf8"))
+    : [];
+
   const email = students[log.id]?.email || "default@example.com";
-  queue.push({
-    name: log.name,
-    status: log.status,
-    date: log.date,
-    time: log.time,
-    email,
-  });
+  queue.push({ ...log, email });
   fs.writeFileSync(emailQueuePath, JSON.stringify(queue, null, 2));
 }
 
@@ -61,50 +41,8 @@ function getStudentName(tag) {
   return students[tag]?.name || `Unknown (${tag})`;
 }
 
-// ----------------------
-// ✅ Arduino POST Route
-// ----------------------
-app.post("/api/arduino-tag", (req, res) => {
-  const { tag } = req.body;
+// ROUTES
 
-  if (!tag || !/^[0-9A-F]{8,}$/.test(tag)) {
-    return res.status(400).json({ message: "Invalid or missing tag" });
-  }
-
-  const now = Date.now();
-  const time = new Date();
-  const readableTime = time.toLocaleTimeString();
-  const readableDate = time.toLocaleDateString();
-  const name = getStudentName(tag);
-
-  const previous = lastSeen[tag];
-  let status;
-  if (!previous || previous.status === "OUT") {
-    status = "IN";
-  } else if (previous.status === "IN" && now - previous.timestamp > 5000) {
-    status = "OUT";
-  } else {
-    return res.status(200).json({ message: "Ignored duplicate tag" });
-  }
-
-  lastSeen[tag] = { timestamp: now, status };
-  const log = { id: tag, name, time: readableTime, date: readableDate, status };
-  attendanceList.push(log);
-  queueEmail(log);
-  io.emit("rfid_tag", log);
-
-  try {
-    sendEmails();
-  } catch (error) {
-    console.error("sendEmails error:", error.message);
-  }
-
-  res.status(200).json({ message: "Tag logged successfully" });
-});
-
-// ----------------------
-// Frontend routes
-// ----------------------
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
@@ -113,9 +51,6 @@ app.get("/dashboard", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
 
-// ----------------------
-// Register new student
-// ----------------------
 app.post("/register-student", (req, res) => {
   const { tag, name, email } = req.body;
   if (!tag || !name || !email) {
@@ -126,22 +61,62 @@ app.post("/register-student", (req, res) => {
   res.json({ message: "Student registered successfully" });
 });
 
-// ----------------------
-// Send all queued emails
-// ----------------------
 app.post("/send-emails", (req, res) => {
   try {
     sendEmails();
-    res.json({ message: "Emails sent!" });
+    res.json({ message: "Email alerts sent!" });
   } catch (err) {
-    console.error("Send email error:", err.message);
     res.status(500).json({ message: "Failed to send emails" });
   }
 });
 
-// ----------------------
-// Socket.IO Operations
-// ----------------------
+// ✅ This is for your serial-relay.js to send tag data to the cloud server
+app.post("/receive-tag", (req, res) => {
+  const { tag } = req.body;
+  if (!tag || !/^[0-9A-F]{8,}$/.test(tag.toUpperCase())) {
+    return res.status(400).json({ message: "Invalid tag format" });
+  }
+
+  const now = Date.now();
+  const time = new Date();
+  const readableTime = time.toLocaleTimeString();
+  const readableDate = time.toLocaleDateString();
+  const name = getStudentName(tag);
+
+  const previous = lastSeen[tag];
+  let status = "IN";
+
+  if (previous?.status === "IN" && now - previous.timestamp > 5000) {
+    status = "OUT";
+  } else if (previous?.status === "OUT") {
+    status = "IN";
+  }
+
+  lastSeen[tag] = { timestamp: now, status };
+
+  const log = {
+    id: tag,
+    name,
+    time: readableTime,
+    date: readableDate,
+    status,
+  };
+
+  attendanceList.push(log);
+  queueEmail(log);
+  io.emit("rfid_tag", log);
+
+  try {
+    sendEmails();
+  } catch (err) {
+    console.error("❌ sendEmails error:", err.message);
+  }
+
+  res.json({ message: "Tag processed", log });
+});
+
+// SOCKET.IO HANDLERS
+
 io.on("connection", (socket) => {
   socket.on("login", (data) => {
     if (data.username === credentials.username && data.password === credentials.password) {
@@ -181,16 +156,8 @@ io.on("connection", (socket) => {
   socket.emit("attendance_list", attendanceList);
 });
 
-// ----------------------
-// Global error handler
-// ----------------------
-process.on("uncaughtException", (error) => {
-  console.error("💥 Uncaught Exception:", error);
-});
-
-// ----------------------
-// Start the server
-// ----------------------
+// SERVER START
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`✅ Server running at http://localhost:${PORT}`);
 });
