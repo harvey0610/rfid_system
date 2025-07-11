@@ -1,0 +1,4 @@
+.env
+node_modules/
+emailQueue.json
+attendance.xlsx
